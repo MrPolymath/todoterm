@@ -197,12 +197,21 @@ class TodoApp(App):
         text-align: center;
         text-style: bold;
     }
+    .status-todo {
+        color: red;
+    }
+    .status-doing {
+        color: blue;
+    }
+    .status-done {
+        color: green;
+    }
     """
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("n", "new_task", "New Task"),
-        Binding("enter", "select_task", "Change Status"),
+        Binding("s", "select_task", "Change Status"),
         Binding("d", "delete_task", "Delete Task"),
     ]
 
@@ -218,7 +227,7 @@ class TodoApp(App):
 
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
-        yield Header("📝 Todo App - Press [Enter] to change status, [N] new task, [D] delete, [Q] quit")
+        yield Header("�� Todo App - Press [S] to change status, [N] new task, [D] delete, [Q] quit")
         yield DataTable(id="task-table")
         yield Footer()
 
@@ -232,6 +241,13 @@ class TodoApp(App):
             "Title", "Description", "Deadline", "Tags", "Status"
         )
 
+        # Define status colors
+        status_colors = {
+            'todo': 'red',
+            'doing': 'blue',
+            'done': 'green'
+        }
+
         # Add rows
         for task in get_tasks():
             id_, title, desc, deadline, status, tags = task
@@ -239,7 +255,8 @@ class TodoApp(App):
             tags_str = tags if tags else ""
             tags_str = ", ".join(f"#{tag}" for tag in tags_str.split(
                 ",")) if tags_str else ""
-            status_text = STATUSES.get(status, "Todo")
+            color = status_colors.get(status, 'white')
+            status_text = f"[{color}]{STATUSES[status]}[/]"
 
             # Add row without key
             table.add_row(
@@ -252,13 +269,52 @@ class TodoApp(App):
 
     def action_select_task(self) -> None:
         """Handle task selection."""
+        debug_print("action_select_task triggered")
         table = self.query_one("#task-table", DataTable)
         if table.cursor_row is not None:
+            current_row = table.cursor_row
+            debug_print(f"Selected row: {current_row}")
             # Get the task data from get_tasks() using the row index
             tasks = get_tasks()
-            task_id = tasks[table.cursor_row][0]  # First element is ID
-            self.current_task_id = task_id
-            self.show_status_menu()
+            task = tasks[current_row]
+            task_id = task[0]  # First element is ID
+            current_status = task[4]  # Fifth element is status
+            debug_print(f"Current status: {current_status}")
+
+            # Define status cycle
+            status_cycle = {
+                'todo': 'doing',
+                'doing': 'done',
+                'done': 'todo'
+            }
+
+            # Define status colors
+            status_colors = {
+                'todo': 'red',
+                'doing': 'blue',
+                'done': 'green'
+            }
+
+            # Get next status
+            new_status = status_cycle.get(current_status, 'todo')
+            debug_print(
+                f"Changing status from {current_status} to {new_status}")
+
+            # Update status
+            update_task_status(task_id, new_status)
+            self.refresh_table()
+
+            # Restore cursor position
+            table = self.query_one("#task-table", DataTable)
+            table.move_cursor(row=current_row)
+            table.scroll_to(0, current_row)
+            debug_print(f"Restored cursor to row {current_row}")
+
+            color = status_colors.get(new_status, 'white')
+            self.show_message(
+                f"Changed status to [{color}]{STATUSES[new_status]}[/]")
+        else:
+            debug_print("No row selected")
 
     def show_status_menu(self) -> None:
         """Show a menu to change task status."""
@@ -278,17 +334,26 @@ class TodoApp(App):
             classes="status-menu"
         )
 
-        async def handle_status_change(status_select: Select) -> None:
-            status = status_select.value
+        async def handle_status_change(event: Select.Changed) -> None:
+            debug_print("Status change handler triggered")
+            status = event.value
             debug_print(f"Status selected: {status}")
-            update_task_status(self.current_task_id, status)
-            debug_print(
-                f"Updated task {self.current_task_id} status to {status}")
-            await self.refresh_table()
-            status_select.remove()
 
-        status_select.on_select_option = handle_status_change
+            try:
+                update_task_status(self.current_task_id, status)
+                debug_print(
+                    f"Updated task {self.current_task_id} status to {status}")
+                self.refresh_table()
+                debug_print("Table refreshed")
+            except Exception as e:
+                debug_print(f"Error updating status: {str(e)}")
+            finally:
+                status_select.remove()
+                debug_print("Status menu removed")
+
+        status_select.changed = handle_status_change
         self.mount(status_select)
+        debug_print("Status menu mounted")
 
     def refresh_table(self) -> None:
         """Refresh the task table."""
@@ -306,6 +371,13 @@ class TodoApp(App):
         )
         debug_print("Added fresh columns")
 
+        # Define status colors
+        status_colors = {
+            'todo': 'red',
+            'doing': 'blue',
+            'done': 'green'
+        }
+
         tasks = get_tasks()
         debug_print(f"Got {len(tasks)} tasks from database")
 
@@ -315,7 +387,8 @@ class TodoApp(App):
             tags_str = tags if tags else ""
             tags_str = ", ".join(f"#{tag}" for tag in tags_str.split(
                 ",")) if tags_str else ""
-            status_text = STATUSES.get(status, "Todo")
+            color = status_colors.get(status, 'white')
+            status_text = f"[{color}]{STATUSES[status]}[/]"
             debug_print(
                 f"Adding row for task {id_} with status {status} (display: {status_text})")
 
@@ -349,7 +422,7 @@ class TodoApp(App):
             current_row = table.cursor_row
             # Get the task data from get_tasks() using the row index
             tasks = get_tasks()
-            task_id = tasks[table.cursor_row][0]  # First element is ID
+            task_id = tasks[current_row][0]  # First element is ID
             delete_task(task_id)
             self.show_message(f"Task {task_id} deleted successfully!")
             self.refresh_table()
