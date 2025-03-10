@@ -136,6 +136,14 @@ class RefreshMessage(Message):
     """Message to request a table refresh."""
 
 
+class SearchMessage(Message):
+    """Message sent when search text changes."""
+
+    def __init__(self, search_text: str) -> None:
+        self.search_text = search_text
+        super().__init__()
+
+
 def format_deadline(deadline_str):
     """Format deadline in a human-readable format."""
     if not deadline_str:
@@ -190,20 +198,28 @@ class FilterScreen(Screen):
                 yield Button("All", id="filter-all", variant="primary")
                 for status in STATUSES.keys():
                     yield Button(STATUSES[status], id=f"filter-{status}")
-            yield Label("Filter by tags:")
-            # Get unique tags from database
+
+            # Get unique tags from database - improved query
             conn = sqlite3.connect(os.path.expanduser("~/.todo.db"))
             c = conn.cursor()
-            c.execute('SELECT DISTINCT name FROM tags ORDER BY name')
+            c.execute('''
+                SELECT DISTINCT t.name 
+                FROM tags t 
+                JOIN task_tags tt ON t.id = tt.tag_id 
+                ORDER BY t.name
+            ''')
             tags = [row[0] for row in c.fetchall()]
             conn.close()
+            debug_print(f"Found tags in database: {tags}")
 
             if tags:
+                yield Label("Filter by tags:")
                 with Grid(id="tag-grid"):
                     for tag in tags:
-                        yield Button(f"#{tag}", id=f"filter-tag-{tag}")
+                        debug_print(f"Creating button for tag: {tag}")
+                        yield Button(f"#{tag}", id=f"filter-tag-{tag}", variant="default")
             else:
-                yield Label("No tags available")
+                yield Label("No tags available - add tasks with #tags to enable filtering")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
@@ -227,6 +243,51 @@ class FilterScreen(Screen):
     def action_quit(self) -> None:
         """Close the filter screen."""
         self.app.pop_screen()
+
+
+class SearchScreen(Screen):
+    """Screen for searching tasks."""
+
+    BINDINGS = [
+        Binding("escape", "quit", "Close"),
+    ]
+
+    CSS = """
+    #search-container {
+        padding: 1;
+        background: $surface;
+        border: solid $primary;
+        height: auto;
+        width: 60;
+        margin: 1 2;
+    }
+    Input {
+        margin: 1 0;
+    }
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.title = "Search Tasks"
+
+    def compose(self) -> ComposeResult:
+        with Container(id="search-container"):
+            yield Label("Search tasks (fuzzy matching):")
+            yield Input(id="search", placeholder="Type to search...")
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """Handle search input changes."""
+        if event.input.id == "search":
+            # Update the app's search filter without closing the screen
+            self.app.filter_search = event.value.lower()
+            # Just refresh the table
+            self.app.refresh_table()
+
+    def action_quit(self) -> None:
+        """Close the search screen."""
+        self.app.filter_search = ""
+        self.app.pop_screen()
+        self.app.set_timer(0.1, self.app.refresh_table)
 
 
 class TodoApp(App):
@@ -267,6 +328,24 @@ class TodoApp(App):
         padding: 1;
         height: 3;
     }
+    #search-container {
+        dock: bottom;
+        height: 3;
+        padding: 0 1;
+        background: $surface;
+        border-top: solid $primary;
+        display: none;
+    }
+    #search-container.visible {
+        display: block;
+    }
+    #search {
+        width: 100%;
+        height: 3;
+        background: $surface;
+        border: none;
+        color: $text;
+    }
     Screen {
         height: 100%;
     }
@@ -296,9 +375,10 @@ class TodoApp(App):
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("n", "new_task", "New Task"),
-        Binding("s", "select_task", "Change Status"),
         Binding("d", "delete_task", "Delete Task"),
         Binding("f", "show_filters", "Filter Tasks"),
+        Binding("s", "show_search", "Search"),
+        Binding("enter,space", "change_status", "Change Status"),
     ]
 
     def __init__(self):
@@ -307,22 +387,33 @@ class TodoApp(App):
         self.message = ""
         self.filter_status = None
         self.filter_tag = None
+        self.filter_search = None
 
     def on_refresh_message(self, message: RefreshMessage) -> None:
         """Handle refresh message."""
         debug_print("Received refresh message")
         self.refresh_table()
 
+    def on_search_message(self, message: SearchMessage) -> None:
+        """Handle search message."""
+        debug_print(f"Received search message: {message.search_text}")
+        self.filter_search = message.search_text
+        self.set_timer(0.1, self.refresh_table)
+
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
-        yield Header("Todo App - Press [S] to change status, [N] new task, [D] delete, [F] filter, [Q] quit")
+        yield Header("Todo App - Press ENTER/SPACE to change status, [N] new task, [D] delete, [F] filter, [S] search, [Q] quit")
         yield DataTable(id="task-table")
         yield Footer()
+        with Container(id="search-container"):
+            yield Input(id="search", placeholder="Type to search (ESC to close)...")
 
     def on_mount(self) -> None:
         """Set up the application on mount."""
         table = self.query_one("#task-table", DataTable)
         table.cursor_type = "row"
+        search_container = self.query_one("#search-container")
+        search_container.remove_class("visible")
 
         # Add columns (without ID)
         table.add_columns(
@@ -330,23 +421,37 @@ class TodoApp(App):
         )
 
         # Add rows
-        for task in get_tasks():
-            id_, title, desc, deadline, status, tags = task
-            deadline_str = format_deadline(deadline) if deadline else ""
-            tags_str = tags if tags else ""
-            tags_str = ", ".join(f"#{tag}" for tag in tags_str.split(
-                ",")) if tags_str else ""
-            color = self.STATUS_COLORS.get(status, 'white')
-            status_text = f"[{color}]{STATUSES[status]}[/]"
+        self.refresh_table()
 
-            # Add row without key
-            table.add_row(
-                title,
-                desc or "",
-                deadline_str,
-                tags_str,
-                status_text
-            )
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """Handle search input changes."""
+        if event.input.id == "search":
+            self.filter_search = event.value.lower()
+            self.refresh_table()
+
+    def action_show_search(self) -> None:
+        """Toggle search input visibility."""
+        search_container = self.query_one("#search-container")
+        search_input = self.query_one("#search", Input)
+
+        if "visible" in search_container.classes:
+            # Hide search
+            search_container.remove_class("visible")
+            self.filter_search = ""
+            self.refresh_table()
+        else:
+            # Show search
+            search_container.add_class("visible")
+            search_input.focus()
+
+    def on_key(self, event: events.Key) -> None:
+        """Handle key events."""
+        if event.key == "escape":
+            search_container = self.query_one("#search-container")
+            if "visible" in search_container.classes:
+                search_container.remove_class("visible")
+                self.filter_search = ""
+                self.refresh_table()
 
     def action_select_task(self) -> None:
         """Handle task selection."""
@@ -433,7 +538,7 @@ class TodoApp(App):
         """Refresh the task table."""
         debug_print("Refreshing table")
         debug_print(
-            f"Current filters - status: {self.filter_status}, tag: {self.filter_tag}")
+            f"Current filters - status: {self.filter_status}, tag: {self.filter_tag}, search: {self.filter_search}")
         table = self.query_one("#task-table", DataTable)
 
         # Clear both rows and columns
@@ -455,18 +560,30 @@ class TodoApp(App):
 
             # Apply filters
             if self.filter_status and status != self.filter_status:
+                debug_print(f"Skipping task {id_} due to status filter")
                 continue
-            if self.filter_tag and (not tags or self.filter_tag not in tags.split(',')):
-                continue
+
+            if self.filter_tag:
+                task_tags = tags.split(',') if tags else []
+                debug_print(
+                    f"Checking tag filter {self.filter_tag} against task tags: {task_tags}")
+                if not task_tags or self.filter_tag not in task_tags:
+                    debug_print(f"Skipping task {id_} due to tag filter")
+                    continue
+
+            # Apply search filter (fuzzy match on title and description)
+            if self.filter_search:
+                search_text = (title + " " + (desc or "")).lower()
+                if not any(term in search_text for term in self.filter_search.split()):
+                    debug_print(f"Skipping task {id_} due to search filter")
+                    continue
 
             deadline_str = format_deadline(deadline) if deadline else ""
             tags_str = tags if tags else ""
-            tags_str = ", ".join(f"#{tag}" for tag in tags_str.split(
-                ",")) if tags_str else ""
+            tags_str = ", ".join(
+                f"#{tag}" for tag in tags_str.split(",")) if tags_str else ""
             color = self.STATUS_COLORS.get(status, 'white')
             status_text = f"[{color}]{STATUSES[status]}[/]"
-            debug_print(
-                f"Adding row for task {id_} with status {status} (display: {status_text})")
 
             table.add_row(
                 title,
@@ -482,6 +599,8 @@ class TodoApp(App):
             filter_msg.append(f"Status: {STATUSES[self.filter_status]}")
         if self.filter_tag:
             filter_msg.append(f"Tag: #{self.filter_tag}")
+        if self.filter_search:
+            filter_msg.append(f"Search: '{self.filter_search}'")
 
         if filter_msg:
             self.show_message(f"Filtered by {' and '.join(filter_msg)}")
@@ -530,6 +649,48 @@ class TodoApp(App):
     def action_show_filters(self) -> None:
         """Show the filter screen."""
         self.push_screen(FilterScreen())
+
+    def action_change_status(self) -> None:
+        """Handle status change with enter/space."""
+        debug_print("action_change_status triggered")
+        table = self.query_one("#task-table", DataTable)
+        if table.cursor_row is not None:
+            current_row = table.cursor_row
+            debug_print(f"Selected row: {current_row}")
+            # Get the task data from get_tasks() using the row index
+            tasks = get_tasks()
+            task = tasks[current_row]
+            task_id = task[0]  # First element is ID
+            current_status = task[4]  # Fifth element is status
+            debug_print(f"Current status: {current_status}")
+
+            # Define status cycle
+            status_cycle = {
+                'todo': 'doing',
+                'doing': 'done',
+                'done': 'todo'
+            }
+
+            # Get next status
+            new_status = status_cycle.get(current_status, 'todo')
+            debug_print(
+                f"Changing status from {current_status} to {new_status}")
+
+            # Update status
+            update_task_status(task_id, new_status)
+            self.refresh_table()
+
+            # Restore cursor position
+            table = self.query_one("#task-table", DataTable)
+            table.move_cursor(row=current_row)
+            table.scroll_to(0, current_row)
+            debug_print(f"Restored cursor to row {current_row}")
+
+            color = self.STATUS_COLORS.get(new_status, 'white')
+            self.show_message(
+                f"Changed status to [{color}]{STATUSES[new_status]}[/]")
+        else:
+            debug_print("No row selected")
 
 
 class NewTaskScreen(Screen):
