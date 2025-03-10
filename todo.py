@@ -6,7 +6,7 @@ from datetime import datetime
 import dateparser
 import logging
 from rich.console import Console
-from rich.table import Table
+from rich.table import Table, Column
 from rich.prompt import Prompt, Confirm
 from textual.app import App, ComposeResult
 from textual.containers import Container, Vertical, Horizontal
@@ -163,6 +163,10 @@ class TodoApp(App):
     Screen {
         height: 100%;
     }
+    .hidden {
+        visibility: hidden;
+        width: 0;
+    }
     """
 
     BINDINGS = [
@@ -193,9 +197,10 @@ class TodoApp(App):
         table = self.query_one("#task-table", DataTable)
         table.cursor_type = "row"
 
-        # Add columns
-        table.add_columns("ID", "Title", "Description",
-                          "Deadline", "Tags", "Status")
+        # Add columns (without ID)
+        table.add_columns(
+            "Title", "Description", "Deadline", "Tags", "Status"
+        )
 
         # Add rows
         for task in get_tasks():
@@ -206,8 +211,8 @@ class TodoApp(App):
                 ",")) if tags_str else ""
             status_icon = STATUSES.get(status, "📝")
 
+            # Add row without key
             table.add_row(
-                str(id_),
                 title,
                 desc or "",
                 deadline_str,
@@ -219,8 +224,10 @@ class TodoApp(App):
         """Handle task selection."""
         table = self.query_one("#task-table", DataTable)
         if table.cursor_row is not None:
-            row = table.get_row_at(table.cursor_row)
-            self.current_task_id = int(row[0])
+            # Get the task data from get_tasks() using the row index
+            tasks = get_tasks()
+            task_id = tasks[table.cursor_row][0]  # First element is ID
+            self.current_task_id = task_id
             self.show_status_menu()
 
     def show_status_menu(self) -> None:
@@ -243,8 +250,9 @@ class TodoApp(App):
         """Refresh the task table."""
         table = self.query_one("#task-table", DataTable)
         table.clear()
-        table.add_columns("ID", "Title", "Description",
-                          "Deadline", "Tags", "Status")
+        table.add_columns(
+            "Title", "Description", "Deadline", "Tags", "Status"
+        )
 
         for task in get_tasks():
             id_, title, desc, deadline, status, tags = task
@@ -254,8 +262,8 @@ class TodoApp(App):
                 ",")) if tags_str else ""
             status_icon = STATUSES.get(status, "📝")
 
+            # Add row without key
             table.add_row(
-                str(id_),
                 title,
                 desc or "",
                 deadline_str,
@@ -283,8 +291,9 @@ class TodoApp(App):
         table = self.query_one("#task-table", DataTable)
         if table.cursor_row is not None:
             current_row = table.cursor_row
-            row = table.get_row_at(table.cursor_row)
-            task_id = int(row[0])
+            # Get the task data from get_tasks() using the row index
+            tasks = get_tasks()
+            task_id = tasks[table.cursor_row][0]  # First element is ID
             delete_task(task_id)
             self.show_message(f"Task {task_id} deleted successfully!")
             self.refresh_table()
