@@ -1,0 +1,10 @@
+#!/bin/bash
+
+# Get the absolute path to the project directory
+PROJECT_DIR="/Users/mrpolymath/DEV/todoterm"
+
+# Activate the virtual environment
+source "$PROJECT_DIR/venv/bin/activate"
+
+# Run the todo script
+python "$PROJECT_DIR/todo.py" "$@"
