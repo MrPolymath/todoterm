@@ -153,8 +153,9 @@ def format_deadline(deadline_str):
         deadline = datetime.fromisoformat(deadline_str)
         now = datetime.now()
 
+        time_str = humanize.naturaltime(deadline)
         if deadline < now:
-            return f"⚠️ {humanize.naturaltime(deadline)}"
+            return f"[red]{time_str}[/]"
         else:
             return humanize.naturaltime(deadline, when=now, future=True)
     except (ValueError, TypeError):
@@ -851,7 +852,8 @@ def delete_task(task_id):
 
 @click.command()
 @click.argument('command', nargs=-1)
-def main(command):
+@click.option('-d', '--description', help='Task description')
+def main(command, description):
     """A simple terminal-based todo application."""
     # Initialize database
     init_db()
@@ -870,8 +872,9 @@ def main(command):
         console.print("[red]Error: Please provide a title for the task[/red]")
         return
 
-    # Get description using rich prompt
-    description = Prompt.ask("Description (optional)")
+    # Get description using rich prompt only if not provided via CLI
+    if description is None:
+        description = Prompt.ask("Description (optional)")
 
     # Add the task
     add_task(title, description, deadline, tags)
