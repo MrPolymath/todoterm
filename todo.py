@@ -9,7 +9,7 @@ from rich.console import Console
 from rich.table import Table, Column
 from rich.prompt import Prompt, Confirm
 from textual.app import App, ComposeResult
-from textual.containers import Container, Vertical, Horizontal
+from textual.containers import Container, Vertical, Horizontal, Grid
 from textual.widgets import Header, Footer, DataTable, Button, Select, Input, Label, Static
 from textual.binding import Binding
 from textual import events
@@ -153,6 +153,82 @@ def format_deadline(deadline_str):
         return ""
 
 
+class FilterScreen(Screen):
+    """Screen for selecting task filters."""
+
+    BINDINGS = [
+        Binding("q", "quit", "Close"),
+    ]
+
+    CSS = """
+    #filter-container {
+        padding: 1;
+        background: $surface;
+        border: solid $primary;
+        height: auto;
+        width: auto;
+        margin: 1 2;
+    }
+    #tag-grid {
+        grid-size: 4;  /* Show 4 buttons per row */
+        grid-gutter: 1;
+        grid-columns: 4;
+        padding: 1;
+    }
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.title = "Filter Tasks"
+        debug_print("FilterScreen initialized")
+
+    def compose(self) -> ComposeResult:
+        """Create the filter UI."""
+        with Container(id="filter-container"):
+            yield Label("Filter by status:")
+            with Horizontal():
+                yield Button("All", id="filter-all", variant="primary")
+                for status in STATUSES.keys():
+                    yield Button(STATUSES[status], id=f"filter-{status}")
+            yield Label("Filter by tags:")
+            # Get unique tags from database
+            conn = sqlite3.connect(os.path.expanduser("~/.todo.db"))
+            c = conn.cursor()
+            c.execute('SELECT DISTINCT name FROM tags ORDER BY name')
+            tags = [row[0] for row in c.fetchall()]
+            conn.close()
+
+            if tags:
+                with Grid(id="tag-grid"):
+                    for tag in tags:
+                        yield Button(f"#{tag}", id=f"filter-tag-{tag}")
+            else:
+                yield Label("No tags available")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle button presses."""
+        button_id = event.button.id
+        if button_id == "filter-all":
+            self.app.filter_status = None
+            self.app.filter_tag = None
+        elif button_id.startswith("filter-tag-"):
+            tag = button_id[11:]  # Remove "filter-tag-" prefix
+            self.app.filter_tag = tag
+            self.app.filter_status = None
+        elif button_id.startswith("filter-"):
+            status = button_id[7:]  # Remove "filter-" prefix
+            self.app.filter_status = status
+            self.app.filter_tag = None
+
+        # First pop the screen, then refresh the table
+        self.app.pop_screen()
+        self.app.set_timer(0.1, self.app.refresh_table)
+
+    def action_quit(self) -> None:
+        """Close the filter screen."""
+        self.app.pop_screen()
+
+
 class TodoApp(App):
     """A Textual app to manage todo tasks."""
 
@@ -170,7 +246,15 @@ class TodoApp(App):
     }
     Button {
         margin: 1 2;
-        width: 20;
+        width: auto;
+    }
+    #filter-container {
+        padding: 1;
+        background: $surface;
+        border: solid $primary;
+        height: auto;
+        width: auto;
+        margin: 1 2;
     }
     Select {
         margin: 1 2;
@@ -204,6 +288,9 @@ class TodoApp(App):
         text-align: center;
         text-style: bold;
     }
+    Label {
+        margin: 1 0;
+    }
     """
 
     BINDINGS = [
@@ -211,12 +298,15 @@ class TodoApp(App):
         Binding("n", "new_task", "New Task"),
         Binding("s", "select_task", "Change Status"),
         Binding("d", "delete_task", "Delete Task"),
+        Binding("f", "show_filters", "Filter Tasks"),
     ]
 
     def __init__(self):
         super().__init__()
         self.current_task_id = None
         self.message = ""
+        self.filter_status = None
+        self.filter_tag = None
 
     def on_refresh_message(self, message: RefreshMessage) -> None:
         """Handle refresh message."""
@@ -225,7 +315,7 @@ class TodoApp(App):
 
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
-        yield Header("�� Todo App - Press [S] to change status, [N] new task, [D] delete, [Q] quit")
+        yield Header("Todo App - Press [S] to change status, [N] new task, [D] delete, [F] filter, [Q] quit")
         yield DataTable(id="task-table")
         yield Footer()
 
@@ -342,6 +432,8 @@ class TodoApp(App):
     def refresh_table(self) -> None:
         """Refresh the task table."""
         debug_print("Refreshing table")
+        debug_print(
+            f"Current filters - status: {self.filter_status}, tag: {self.filter_tag}")
         table = self.query_one("#task-table", DataTable)
 
         # Clear both rows and columns
@@ -360,6 +452,13 @@ class TodoApp(App):
 
         for task in tasks:
             id_, title, desc, deadline, status, tags = task
+
+            # Apply filters
+            if self.filter_status and status != self.filter_status:
+                continue
+            if self.filter_tag and (not tags or self.filter_tag not in tags.split(',')):
+                continue
+
             deadline_str = format_deadline(deadline) if deadline else ""
             tags_str = tags if tags else ""
             tags_str = ", ".join(f"#{tag}" for tag in tags_str.split(
@@ -376,6 +475,18 @@ class TodoApp(App):
                 tags_str,
                 status_text
             )
+
+        # Update footer to show active filters
+        filter_msg = []
+        if self.filter_status:
+            filter_msg.append(f"Status: {STATUSES[self.filter_status]}")
+        if self.filter_tag:
+            filter_msg.append(f"Tag: #{self.filter_tag}")
+
+        if filter_msg:
+            self.show_message(f"Filtered by {' and '.join(filter_msg)}")
+        else:
+            self.show_message("Showing all tasks")
 
     def action_new_task(self) -> None:
         """Handle new task creation."""
@@ -415,6 +526,10 @@ class TodoApp(App):
             else:
                 # If no tasks left, show a message
                 self.show_message("No tasks remaining")
+
+    def action_show_filters(self) -> None:
+        """Show the filter screen."""
+        self.push_screen(FilterScreen())
 
 
 class NewTaskScreen(Screen):
