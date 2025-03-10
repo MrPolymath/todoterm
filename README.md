@@ -40,21 +40,21 @@ todo "Task title"
 ### Add a task with a deadline
 
 ```bash
-todo "Task title" for tomorrow
-todo "Task title" due next week
-todo "Task title" by Friday
+todo "Task title for tomorrow"
+todo "Task title due next week"
+todo "Task title by Friday"
 ```
 
 ### Add a task with tags
 
 ```bash
-todo "Task title" #work #urgent
+todo "Task title #work #urgent"
 ```
 
 ### Combine deadline and tags
 
 ```bash
-todo "Task title" for tomorrow #work
+todo "Task title for tomorrow #work"
 ```
 
 ## Features
@@ -69,13 +69,13 @@ todo "Task title" for tomorrow #work
 
 ```bash
 # Add a task for tomorrow
-todo "Call client" for tomorrow #work
+todo "Call client for tomorrow #work"
 
 # Add a task with multiple tags
-todo "Buy groceries" #shopping #personal
+todo "Buy groceries #shopping #personal"
 
 # Add a task with a specific deadline
-todo "Project deadline" due next Friday #work #urgent
+todo "Project deadline due next Friday #work #urgent"
 
 # View all tasks
 todo
