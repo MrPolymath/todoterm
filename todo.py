@@ -378,7 +378,7 @@ class TodoApp(App):
         Binding("d", "delete_task", "Delete Task"),
         Binding("f", "show_filters", "Filter Tasks"),
         Binding("s", "show_search", "Search"),
-        Binding("enter,space", "change_status", "Change Status"),
+        Binding("space", "change_status", "Change Status"),
     ]
 
     def __init__(self):
@@ -402,7 +402,7 @@ class TodoApp(App):
 
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
-        yield Header("Todo App - Press ENTER/SPACE to change status, [N] new task, [D] delete, [F] filter, [S] search, [Q] quit")
+        yield Header("Todo App - Press SPACE to change status, [N] new task, [D] delete, [F] filter, [S] search, [Q] quit")
         yield DataTable(id="task-table")
         yield Footer()
         with Container(id="search-container"):
@@ -412,6 +412,7 @@ class TodoApp(App):
         """Set up the application on mount."""
         table = self.query_one("#task-table", DataTable)
         table.cursor_type = "row"
+        table.can_focus = True
         search_container = self.query_one("#search-container")
         search_container.remove_class("visible")
 
@@ -422,6 +423,9 @@ class TodoApp(App):
 
         # Add rows
         self.refresh_table()
+
+        # Set focus to the table
+        self.set_focus(table)
 
     def on_input_changed(self, event: Input.Changed) -> None:
         """Handle search input changes."""
@@ -452,48 +456,6 @@ class TodoApp(App):
                 search_container.remove_class("visible")
                 self.filter_search = ""
                 self.refresh_table()
-
-    def action_select_task(self) -> None:
-        """Handle task selection."""
-        debug_print("action_select_task triggered")
-        table = self.query_one("#task-table", DataTable)
-        if table.cursor_row is not None:
-            current_row = table.cursor_row
-            debug_print(f"Selected row: {current_row}")
-            # Get the task data from get_tasks() using the row index
-            tasks = get_tasks()
-            task = tasks[current_row]
-            task_id = task[0]  # First element is ID
-            current_status = task[4]  # Fifth element is status
-            debug_print(f"Current status: {current_status}")
-
-            # Define status cycle
-            status_cycle = {
-                'todo': 'doing',
-                'doing': 'done',
-                'done': 'todo'
-            }
-
-            # Get next status
-            new_status = status_cycle.get(current_status, 'todo')
-            debug_print(
-                f"Changing status from {current_status} to {new_status}")
-
-            # Update status
-            update_task_status(task_id, new_status)
-            self.refresh_table()
-
-            # Restore cursor position
-            table = self.query_one("#task-table", DataTable)
-            table.move_cursor(row=current_row)
-            table.scroll_to(0, current_row)
-            debug_print(f"Restored cursor to row {current_row}")
-
-            color = self.STATUS_COLORS.get(new_status, 'white')
-            self.show_message(
-                f"Changed status to [{color}]{STATUSES[new_status]}[/]")
-        else:
-            debug_print("No row selected")
 
     def show_status_menu(self) -> None:
         """Show a menu to change task status."""
@@ -571,9 +533,10 @@ class TodoApp(App):
                     debug_print(f"Skipping task {id_} due to tag filter")
                     continue
 
-            # Apply search filter (fuzzy match on title and description)
+            # Apply search filter (fuzzy match on title, description and tags)
             if self.filter_search:
-                search_text = (title + " " + (desc or "")).lower()
+                search_text = (title + " " + (desc or "") +
+                               " " + (tags or "")).lower()
                 if not any(term in search_text for term in self.filter_search.split()):
                     debug_print(f"Skipping task {id_} due to search filter")
                     continue
@@ -651,7 +614,7 @@ class TodoApp(App):
         self.push_screen(FilterScreen())
 
     def action_change_status(self) -> None:
-        """Handle status change with enter/space."""
+        """Handle status change with ENTER key."""
         debug_print("action_change_status triggered")
         table = self.query_one("#task-table", DataTable)
         if table.cursor_row is not None:
