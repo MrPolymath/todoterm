@@ -156,6 +156,13 @@ def format_deadline(deadline_str):
 class TodoApp(App):
     """A Textual app to manage todo tasks."""
 
+    # Status color mapping
+    STATUS_COLORS = {
+        'todo': 'red',
+        'doing': 'blue',
+        'done': 'green'
+    }
+
     CSS = """
     #task-table {
         height: 1fr;
@@ -197,15 +204,6 @@ class TodoApp(App):
         text-align: center;
         text-style: bold;
     }
-    .status-todo {
-        color: red;
-    }
-    .status-doing {
-        color: blue;
-    }
-    .status-done {
-        color: green;
-    }
     """
 
     BINDINGS = [
@@ -241,13 +239,6 @@ class TodoApp(App):
             "Title", "Description", "Deadline", "Tags", "Status"
         )
 
-        # Define status colors
-        status_colors = {
-            'todo': 'red',
-            'doing': 'blue',
-            'done': 'green'
-        }
-
         # Add rows
         for task in get_tasks():
             id_, title, desc, deadline, status, tags = task
@@ -255,7 +246,7 @@ class TodoApp(App):
             tags_str = tags if tags else ""
             tags_str = ", ".join(f"#{tag}" for tag in tags_str.split(
                 ",")) if tags_str else ""
-            color = status_colors.get(status, 'white')
+            color = self.STATUS_COLORS.get(status, 'white')
             status_text = f"[{color}]{STATUSES[status]}[/]"
 
             # Add row without key
@@ -288,13 +279,6 @@ class TodoApp(App):
                 'done': 'todo'
             }
 
-            # Define status colors
-            status_colors = {
-                'todo': 'red',
-                'doing': 'blue',
-                'done': 'green'
-            }
-
             # Get next status
             new_status = status_cycle.get(current_status, 'todo')
             debug_print(
@@ -310,7 +294,7 @@ class TodoApp(App):
             table.scroll_to(0, current_row)
             debug_print(f"Restored cursor to row {current_row}")
 
-            color = status_colors.get(new_status, 'white')
+            color = self.STATUS_COLORS.get(new_status, 'white')
             self.show_message(
                 f"Changed status to [{color}]{STATUSES[new_status]}[/]")
         else:
@@ -371,13 +355,6 @@ class TodoApp(App):
         )
         debug_print("Added fresh columns")
 
-        # Define status colors
-        status_colors = {
-            'todo': 'red',
-            'doing': 'blue',
-            'done': 'green'
-        }
-
         tasks = get_tasks()
         debug_print(f"Got {len(tasks)} tasks from database")
 
@@ -387,7 +364,7 @@ class TodoApp(App):
             tags_str = tags if tags else ""
             tags_str = ", ".join(f"#{tag}" for tag in tags_str.split(
                 ",")) if tags_str else ""
-            color = status_colors.get(status, 'white')
+            color = self.STATUS_COLORS.get(status, 'white')
             status_text = f"[{color}]{STATUSES[status]}[/]"
             debug_print(
                 f"Adding row for task {id_} with status {status} (display: {status_text})")
