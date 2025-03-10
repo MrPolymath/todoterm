@@ -39,9 +39,9 @@ for file in [log_file, debug_file]:
 
 # Task statuses
 STATUSES = {
-    "todo": "📝",
-    "doing": "⚡",
-    "done": "✓"
+    "todo": "Todo",
+    "doing": "Doing",
+    "done": "Done"
 }
 
 
@@ -108,12 +108,28 @@ def get_tasks():
 
 def update_task_status(task_id, new_status):
     """Update the status of a task."""
+    debug_print(f"Updating task {task_id} status to {new_status}")
     conn = sqlite3.connect(os.path.expanduser("~/.todo.db"))
     c = conn.cursor()
-    c.execute('UPDATE tasks SET status = ? WHERE id = ?',
-              (new_status, task_id))
-    conn.commit()
-    conn.close()
+    try:
+        c.execute('UPDATE tasks SET status = ? WHERE id = ?',
+                  (new_status, task_id))
+        conn.commit()
+
+        # Verify the update
+        c.execute('SELECT status FROM tasks WHERE id = ?', (task_id,))
+        result = c.fetchone()
+        if result and result[0] == new_status:
+            debug_print(
+                f"Successfully updated task {task_id} status to {new_status}")
+        else:
+            debug_print(
+                f"Failed to update task {task_id} status. Current status: {result[0] if result else 'not found'}")
+    except Exception as e:
+        debug_print(f"Error updating task status: {str(e)}")
+        raise
+    finally:
+        conn.close()
 
 
 class RefreshMessage(Message):
@@ -167,12 +183,26 @@ class TodoApp(App):
         visibility: hidden;
         width: 0;
     }
+    .status-menu {
+        dock: right;
+        width: 30;
+        height: auto;
+        background: $panel;
+        border: solid $primary;
+        padding: 1;
+    }
+    Header {
+        background: $primary;
+        color: $text;
+        text-align: center;
+        text-style: bold;
+    }
     """
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("n", "new_task", "New Task"),
-        Binding("enter", "select_task", "Select Task"),
+        Binding("enter", "select_task", "Change Status"),
         Binding("d", "delete_task", "Delete Task"),
     ]
 
@@ -188,7 +218,7 @@ class TodoApp(App):
 
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
-        yield Header()
+        yield Header("📝 Todo App - Press [Enter] to change status, [N] new task, [D] delete, [Q] quit")
         yield DataTable(id="task-table")
         yield Footer()
 
@@ -209,7 +239,7 @@ class TodoApp(App):
             tags_str = tags if tags else ""
             tags_str = ", ".join(f"#{tag}" for tag in tags_str.split(
                 ",")) if tags_str else ""
-            status_icon = STATUSES.get(status, "📝")
+            status_text = STATUSES.get(status, "Todo")
 
             # Add row without key
             table.add_row(
@@ -217,7 +247,7 @@ class TodoApp(App):
                 desc or "",
                 deadline_str,
                 tags_str,
-                status_icon
+                status_text
             )
 
     def action_select_task(self) -> None:
@@ -233,42 +263,68 @@ class TodoApp(App):
     def show_status_menu(self) -> None:
         """Show a menu to change task status."""
         if self.current_task_id is None:
+            debug_print("No task selected for status change")
             return
 
-        def on_status_change(status: str) -> None:
-            update_task_status(self.current_task_id, status)
-            self.refresh_table()
+        debug_print(f"Showing status menu for task {self.current_task_id}")
 
         status_select = Select(
-            [(status, status) for status in STATUSES.keys()],
+            options=[
+                ("Todo", "todo"),
+                ("Doing", "doing"),
+                ("Done", "done")
+            ],
             prompt="Change status to:",
+            classes="status-menu"
         )
-        status_select.on_select = lambda status: on_status_change(status)
+
+        async def handle_status_change(status_select: Select) -> None:
+            status = status_select.value
+            debug_print(f"Status selected: {status}")
+            update_task_status(self.current_task_id, status)
+            debug_print(
+                f"Updated task {self.current_task_id} status to {status}")
+            await self.refresh_table()
+            status_select.remove()
+
+        status_select.on_select_option = handle_status_change
         self.mount(status_select)
 
     def refresh_table(self) -> None:
         """Refresh the task table."""
+        debug_print("Refreshing table")
         table = self.query_one("#task-table", DataTable)
+
+        # Clear both rows and columns
         table.clear()
+        table.columns.clear()
+        debug_print("Cleared table rows and columns")
+
+        # Add columns
         table.add_columns(
             "Title", "Description", "Deadline", "Tags", "Status"
         )
+        debug_print("Added fresh columns")
 
-        for task in get_tasks():
+        tasks = get_tasks()
+        debug_print(f"Got {len(tasks)} tasks from database")
+
+        for task in tasks:
             id_, title, desc, deadline, status, tags = task
             deadline_str = format_deadline(deadline) if deadline else ""
             tags_str = tags if tags else ""
             tags_str = ", ".join(f"#{tag}" for tag in tags_str.split(
                 ",")) if tags_str else ""
-            status_icon = STATUSES.get(status, "📝")
+            status_text = STATUSES.get(status, "Todo")
+            debug_print(
+                f"Adding row for task {id_} with status {status} (display: {status_text})")
 
-            # Add row without key
             table.add_row(
                 title,
                 desc or "",
                 deadline_str,
                 tags_str,
-                status_icon
+                status_text
             )
 
     def action_new_task(self) -> None:
@@ -354,10 +410,10 @@ class NewTaskScreen(Screen):
                         add_task(title, description, deadline, tags)
                         debug_print("Task added successfully!")
                         status.update("Task added successfully!")
-                        debug_print("Scheduling table refresh...")
-                        self.app.call_after_refresh(self.app.refresh_table)
                         debug_print("Popping screen...")
                         self.app.pop_screen()
+                        debug_print("Refreshing table...")
+                        self.app.refresh_table()
                     except Exception as e:
                         debug_print(f"Error adding task: {str(e)}")
                         status.update(f"Error: {str(e)}")
